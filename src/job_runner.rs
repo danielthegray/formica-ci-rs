@@ -62,7 +62,7 @@ pub fn initialize() -> Result<(), JobRunnerError> {
     }
 
     // TODO : configuration parse
-    let job_update_delay = Duration::from_secs(15);
+    let job_update_delay = Duration::from_secs(5*60);
 
     thread::spawn(move || {
         let last_execution_time = Instant::now();
