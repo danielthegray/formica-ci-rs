@@ -1,0 +1,10 @@
+[package]
+name = "formica-ci"
+version = "0.1.0"
+authors = ["Daniel Gray"]
+edition = "2018"
+
+[dependencies]
+exitcode = "1.1.2"
+env_logger = "0.8.1"
+log = "0.4"
