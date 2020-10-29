@@ -22,11 +22,21 @@ pub fn find_script(script_parent: &PathBuf, script_name: &str) -> Result<String,
                 .starts_with(script_name)
     }));
     if scripts.is_empty() {
+        error!(
+            "No script for {} found in {}",
+            script_name,
+            script_parent.to_str().unwrap()
+        );
         return Err(ScriptError {
             kind: ScriptErrorKind::NoScriptFound,
         });
     }
     if scripts.len() > 1 {
+        error!(
+            "Too many scripts for {} found in {}",
+            script_name,
+            script_parent.to_str().unwrap()
+        );
         return Err(ScriptError {
             kind: ScriptErrorKind::TooManyScriptsFound(Vec::from_iter(scripts.iter().map(
                 |script| {

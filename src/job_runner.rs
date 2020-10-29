@@ -62,7 +62,7 @@ pub fn initialize() -> Result<(), JobRunnerError> {
     }
 
     // TODO : configuration parse
-    let job_update_delay = Duration::from_secs(5*60);
+    let job_update_delay = Duration::from_secs(5 * 60);
 
     thread::spawn(move || {
         let last_execution_time = Instant::now();
@@ -73,7 +73,7 @@ pub fn initialize() -> Result<(), JobRunnerError> {
                     Ok(_) => (),
                     Err(update_err) => match update_err.kind {
                         NoScriptFound => warn!("Update script has disappeared!"),
-                        TooManyInitScriptsFound => {
+                        TooManyScriptsFound(_) => {
                             warn!("Unexpectedly, more than one update script found!")
                         }
                     },
