@@ -1,6 +1,6 @@
 mod job_runner;
 
-use job_runner::JobRunnerErrorKind::{
+use job_runner::InitErrorKind::{
     InitScriptExecutionError, NoInitScriptFound, NoUpdateScriptInsideConfig,
     TooManyInitScriptsFound, TooManyUpdateScriptsFound, UpdateScriptExecutionError,
 };
