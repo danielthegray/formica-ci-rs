@@ -1,14 +1,18 @@
 mod script;
 
 use script::ScriptErrorKind::{NoScriptFound, TooManyScriptsFound};
-use std::path::Path;
+use std::env;
+use std::iter::FromIterator;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::thread;
 use std::time::{Duration, Instant};
+use walkdir::{DirEntry, WalkDir};
 
 const CONFIG: &str = "formica_conf";
 pub const CONFIG_INIT_PREFIX: &str = "config_init";
 pub const UPDATE: &str = "update";
+pub const AGENT_INIT: &str = "agent_init";
 
 pub fn initialize() -> Result<(), InitError> {
     debug!("Initializing Formica CI");
@@ -37,12 +41,16 @@ fn update_config() -> Result<std::io::Result<Output>, script::ScriptError> {
 }
 
 fn start_orchestrator() -> Result<(), InitError> {
-
+    let jobs = find_jobs().unwrap();
+    for job in jobs.iter() {
+        println!("FOUND JOB AT {}", job.root_folder.to_str().unwrap());
+    }
+    launch_job_queue_poller();
     Ok(())
 }
 
 fn config_fetch() -> Result<(), InitError> {
-    let current_dir = Path::new(".").to_path_buf();
+    let current_dir = env::current_dir().expect("Failed to detect current directory!");
     let init_script_result = script::find_script(&current_dir, CONFIG_INIT_PREFIX);
     let execution_result = match init_script_result {
         Ok(init_script) => script::execute_script(&current_dir, &init_script),
@@ -93,6 +101,44 @@ fn initial_config_update() -> Result<(), InitError> {
     Ok(())
 }
 
+fn is_agent_init_script(entry: &DirEntry) -> bool {
+    entry.file_type().is_file()
+        && entry
+            .file_name()
+            .to_str()
+            .map(|name| name.starts_with(AGENT_INIT))
+            .unwrap_or(false)
+}
+
+fn find_jobs() -> Result<Vec<Job>, JobRunnerError> {
+    let jobs = Vec::from_iter(
+        WalkDir::new(CONFIG)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|f| f.ok())
+            .filter(|file| is_agent_init_script(file))
+            .map(|agent_init_script| {
+                let job_folder = agent_init_script.path().parent().unwrap().to_path_buf();
+                Job {
+                    name: String::from("a job"),
+                    root_folder: job_folder,
+                }
+            }),
+    );
+    if jobs.is_empty() {
+        return Err(JobRunnerError {
+            kind: JobRunnerErrorKind::NoJobsFound,
+        });
+    }
+
+    Ok(jobs)
+}
+
+fn launch_job_queue_poller() {
+    // TODO: create queue folder if missing
+    // poll queue folder for files
+}
+
 fn launch_background_updater() {
     // TODO : configuration parse
     let job_update_delay = Duration::from_secs(5 * 60);
@@ -118,9 +164,8 @@ fn launch_background_updater() {
 
 pub struct Job {
     name: String,
-    agent_init: PathBuf,
-    agent_cleanup: Option<PathBuf>,
-    steps: Vec<PathBuf>
+    root_folder: PathBuf,
+    //steps: Vec<PathBuf>
 }
 
 #[derive(Debug)]
