@@ -45,7 +45,11 @@ pub fn initialize() -> Result<ShutdownNotifiers, InitError> {
     let (force_terminate_notifier, force_terminate_listener) = create_force_termination_channel();
 
     launch_background_updater();
-    start_orchestrator()?;
+    start_orchestrator(ShutdownListeners {
+        slow_shutdown: slow_shutdown_listener,
+        immediate_shutdown: immediate_shutdown_listener,
+        force_termination: force_terminate_listener,
+    })?;
 
     Ok(ShutdownNotifiers {
         slow_shutdown: slow_shutdown_notifier,
@@ -66,7 +70,7 @@ fn update_config() -> Result<std::io::Result<Output>, script::ScriptError> {
     }
 }
 
-fn start_orchestrator() -> Result<(), InitError> {
+fn start_orchestrator(shutdown_listeners: ShutdownListeners) -> Result<(), InitError> {
     let jobs = find_jobs().unwrap();
     for job in jobs.iter() {
         println!("FOUND JOB AT {}", job.root_folder.to_str().unwrap());
