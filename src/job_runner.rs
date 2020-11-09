@@ -1,7 +1,11 @@
 mod script;
 
 use script::ScriptErrorKind::{NoScriptFound, TooManyScriptsFound};
+
+use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender};
 use std::env;
+use std::fs;
+use std::io::Write;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -11,10 +15,23 @@ use walkdir::{DirEntry, WalkDir};
 
 const CONFIG: &str = "formica_conf";
 pub const CONFIG_INIT_PREFIX: &str = "config_init";
+pub const QUEUE_DIR: &str = "queue";
 pub const UPDATE: &str = "update";
 pub const AGENT_INIT: &str = "agent_init";
 
-pub fn initialize() -> Result<(), InitError> {
+fn create_slow_shutdown_channel() -> (Sender<()>, Receiver<()>) {
+    bounded(1)
+}
+
+fn create_immediate_shutdown_channel() -> (Sender<()>, Receiver<()>) {
+    bounded(1)
+}
+
+fn create_force_termination_channel() -> (Sender<()>, Receiver<()>) {
+    bounded(1)
+}
+
+pub fn initialize() -> Result<ShutdownNotifiers, InitError> {
     debug!("Initializing Formica CI");
     let config_dir = Path::new(CONFIG);
     if !config_dir.is_dir() {
@@ -22,10 +39,19 @@ pub fn initialize() -> Result<(), InitError> {
         config_fetch()?;
     }
     initial_config_update()?;
+    let (slow_shutdown_notifier, slow_shutdown_listener) = create_slow_shutdown_channel();
+    let (immediate_shutdown_notifier, immediate_shutdown_listener) =
+        create_immediate_shutdown_channel();
+    let (force_terminate_notifier, force_terminate_listener) = create_force_termination_channel();
+
     launch_background_updater();
     start_orchestrator()?;
 
-    Ok(())
+    Ok(ShutdownNotifiers {
+        slow_shutdown: slow_shutdown_notifier,
+        immediate_shutdown: immediate_shutdown_notifier,
+        force_termination: force_terminate_notifier,
+    })
 }
 
 fn update_config() -> Result<std::io::Result<Output>, script::ScriptError> {
@@ -46,7 +72,38 @@ fn start_orchestrator() -> Result<(), InitError> {
         println!("FOUND JOB AT {}", job.root_folder.to_str().unwrap());
     }
     launch_job_queue_poller();
+    let job_listener = build_job_queue_channel()?;
+    thread::spawn(move || {
+        loop {
+            select! {
+                recv(job_name) => {
+                    let job_to_run = jobs.iter().filter(|job| job.root_folder//
+                        .file_name().expect("Failed to read job folder name!")//
+                        .to_str().expect("Failed to convert job folder name to Unicode!")//
+                        .contains(job_name)
+                    ).next();
+                    thread::spawn(move || {
+                        run_job(&job_to_run);
+                    })
+                }
+            }
+        }
+    });
     Ok(())
+}
+
+fn run_job(job_to_run: &Job) {
+    let agent_init_script = script::find_script(&job_to_run.root_folder, AGENT_INIT)
+        .expect("Could not find agent_init script!");
+    let worker = script::spawn_worker_script(&job_to_run.root_folder, &agent_init_script);
+    // TODO: better error handling / reporting?
+    let worker = worker.expect("Error when spawning worker");
+    let worker_input = worker.stdin.take().unwrap();
+    worker_input.write_all("ls\n".as_bytes());
+    let worker_output = worker.stdout.take().unwrap();
+    worker
+        .wait()
+        .expect("Failed to wait for process to terminate!");
 }
 
 fn config_fetch() -> Result<(), InitError> {
@@ -134,6 +191,19 @@ fn find_jobs() -> Result<Vec<Job>, JobRunnerError> {
     Ok(jobs)
 }
 
+fn build_job_queue_channel() -> Result<Receiver<String>, InitError> {
+    let (sender, receiver) = unbounded();
+    let job_queue_poll_freq = Duration::from_secs(1);
+
+    // TODO: add mechanism to add files
+    fs::create_dir_all(QUEUE_DIR).expect("Failed to create queue watch folder!");
+
+    thread::spawn(move || loop {
+        thread::sleep(job_queue_poll_freq);
+        let _ = sender.send(String::from("integration_test"));
+    });
+    Ok(receiver)
+}
 fn launch_job_queue_poller() {
     // TODO: create queue folder if missing
     // poll queue folder for files
@@ -166,6 +236,18 @@ pub struct Job {
     name: String,
     root_folder: PathBuf,
     //steps: Vec<PathBuf>
+}
+
+pub struct ShutdownNotifiers {
+    pub slow_shutdown: Sender<()>,
+    pub immediate_shutdown: Sender<()>,
+    pub force_termination: Sender<()>,
+}
+
+pub struct ShutdownListeners {
+    pub slow_shutdown: Receiver<()>,
+    pub immediate_shutdown: Receiver<()>,
+    pub force_termination: Receiver<()>,
 }
 
 #[derive(Debug)]

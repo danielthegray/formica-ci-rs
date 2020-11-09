@@ -1,7 +1,7 @@
 use std::fs;
 use std::iter::FromIterator;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 
 pub fn find_script(script_parent: &PathBuf, script_name: &str) -> Result<String, ScriptError> {
     let files_in_cd = fs::read_dir(script_parent).expect(&format!(
@@ -62,7 +62,7 @@ pub fn find_script(script_parent: &PathBuf, script_name: &str) -> Result<String,
         .to_string())
 }
 
-pub fn execute_script(script_path: &PathBuf, script_file: &str) -> std::io::Result<Output> {
+fn prepare_process(script_path: &PathBuf, script_file: &str) -> Command {
     let absolute_script_path = script_path
         .join(script_file)
         .canonicalize()
@@ -70,18 +70,31 @@ pub fn execute_script(script_path: &PathBuf, script_file: &str) -> std::io::Resu
         .into_os_string()
         .into_string()
         .unwrap();
+    let process: Command;
     if cfg!(target_os = "windows") {
-        Command::new("cmd")
+        process = Command::new("cmd");
+        process
             .current_dir(script_path)
-            .args(&["/C", &absolute_script_path])
-            .output()
+            .args(&["/C", &absolute_script_path]);
     } else {
-        Command::new("sh")
-            .arg("-c")
+        process = Command::new("sh");
+        process
             .current_dir(script_path)
-            .arg(&absolute_script_path)
-            .output()
+            .args(&["-c", &absolute_script_path]);
     }
+    process
+}
+
+pub fn execute_script(script_path: &PathBuf, script_file: &str) -> std::io::Result<Output> {
+    prepare_process(script_path, script_file).output()
+}
+
+pub fn spawn_worker_script(script_path: &PathBuf, script_file: &str) -> std::io::Result<Child> {
+    prepare_process(script_path, script_file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
 }
 
 #[derive(Debug)]
