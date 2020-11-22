@@ -78,17 +78,24 @@ fn start_orchestrator(shutdown_listeners: ShutdownListeners) -> Result<(), InitE
     launch_job_queue_poller();
     let job_listener = build_job_queue_channel()?;
     thread::spawn(move || {
+        let mut slow_shutdown = false;
+        let mut job_list = jobs;
         loop {
             select! {
-                recv(job_name) => {
-                    let job_to_run = jobs.iter().filter(|job| job.root_folder//
-                        .file_name().expect("Failed to read job folder name!")//
-                        .to_str().expect("Failed to convert job folder name to Unicode!")//
-                        .contains(job_name)
-                    ).next();
-                    thread::spawn(move || {
-                        run_job(&job_to_run);
-                    })
+                recv(job_listener) -> job_name => {
+                    if !slow_shutdown {
+                        let job_to_run = job_list.iter().filter(|job| job.root_folder//
+                            .file_name().expect("Failed to read job folder name!")//
+                            .to_str().expect("Failed to convert job folder name to Unicode!")//
+                            .contains(job_name.as_ref().unwrap())
+                        ).next().unwrap();
+                        thread::spawn(move || {
+                            run_job(&job_to_run);
+                        });
+                    }
+                }
+                recv(shutdown_listeners.slow_shutdown) -> _ => {
+                    slow_shutdown = true;
                 }
             }
         }
@@ -101,8 +108,8 @@ fn run_job(job_to_run: &Job) {
         .expect("Could not find agent_init script!");
     let worker = script::spawn_worker_script(&job_to_run.root_folder, &agent_init_script);
     // TODO: better error handling / reporting?
-    let worker = worker.expect("Error when spawning worker");
-    let worker_input = worker.stdin.take().unwrap();
+    let mut worker = worker.expect("Error when spawning worker");
+    let mut worker_input = worker.stdin.take().unwrap();
     worker_input.write_all("ls\n".as_bytes());
     let worker_output = worker.stdout.take().unwrap();
     worker
@@ -204,6 +211,7 @@ fn build_job_queue_channel() -> Result<Receiver<String>, InitError> {
 
     thread::spawn(move || loop {
         thread::sleep(job_queue_poll_freq);
+        info!("Queueing a job!");
         let _ = sender.send(String::from("integration_test"));
     });
     Ok(receiver)

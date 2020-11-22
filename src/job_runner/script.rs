@@ -14,6 +14,10 @@ pub fn find_script(script_parent: &PathBuf, script_name: &str) -> Result<String,
         let filetype = potential_script
             .file_type()
             .expect("Error while checking file type");
+        debug!(
+            "Checking file {}",
+            potential_script.file_name().to_str().unwrap()
+        );
         filetype.is_file()
             && potential_script
                 .file_name()
@@ -70,7 +74,7 @@ fn prepare_process(script_path: &PathBuf, script_file: &str) -> Command {
         .into_os_string()
         .into_string()
         .unwrap();
-    let process: Command;
+    let mut process: Command;
     if cfg!(target_os = "windows") {
         process = Command::new("cmd");
         process

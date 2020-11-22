@@ -119,7 +119,7 @@ fn main() {
     loop {
         select! {
             recv(ctrl_c_receiver) -> _ => {
-                number_of_control_c_presses+=1;
+                number_of_control_c_presses += 1;
                 if number_of_control_c_presses == 1 {
                     info!("Starting slow shutdown: No more jobs will be accepted...");
                     shutdown_notifiers.slow_shutdown.send(());
